@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Punch Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #c2e9fb, #a1c4fd);
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+
+    h2, h3 {
+      text-align: center;
+      color: #2d2d2d;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: auto;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.9);
+      padding: 20px;
+      margin-top: 20px;
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+    }
+
+    button {
+      background: linear-gradient(to right, #667eea, #764ba2);
+      border: none;
+      color: white;
+      padding: 12px 20px;
+      margin: 6px 4px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: 0.3s;
+      width: 100%;
+    }
+
+    button:hover {
+      background: linear-gradient(to right, #5a67d8, #6b46c1);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+
+    select, input[type="time"] {
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+    }
+
+    .status {
+      font-weight: bold;
+      font-size: 16px;
+      margin-top: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: center;
+      background-color: rgba(255,255,255,0.95);
+    }
+
+    th {
+      background: #6c63ff;
+      color: white;
+    }
+
+    @media (max-width: 600px) {
+      button {
+        font-size: 15px;
+        padding: 10px;
+      }
+
+      th, td {
+        font-size: 14px;
+        padding: 6px;
+      }
+
+      h2, h3 {
+        font-size: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>Daily Punch Tracker</h2>
+
+  <!-- Controls -->
+  <div class="card">
+    <button onclick="punchIn()">Punch In</button>
+    <button onclick="punchOut()">Punch Out</button>
+    <button onclick="exportToExcel()">Export Logs</button>
+    <button onclick="showWeeklyReport()">Weekly Report</button>
+    <button onclick="showMonthlyReport()">Monthly Report</button>
+  </div>
+
+  <!-- Manual Entry -->
+  <div class="card">
+    <h3>Manual Entry</h3>
+    <label>Punch In:
+      <input type="time" id="manualIn" />
+    </label>
+    <label>Punch Out:
+      <input type="time" id="manualOut" />
+    </label>
+    <button onclick="manualEntry()">Save Manual Entry</button>
+  </div>
+
+  <!-- Leave or Holiday -->
+  <div class="card">
+    <h3>Mark Leave / Holiday</h3>
+    <select id="dayStatus" onchange="setDayStatus()">
+      <option value="">-- Select --</option>
+      <option value="Leave">Leave</option>
+      <option value="Holiday">Holiday</option>
+      <option value="None">Clear</option>
+    </select>
+  </div>
+
+  <!-- Daily Log -->
+  <div class="card" id="log">
+    <h3>Today's Log</h3>
+    <p><strong>Date:</strong> <span id="date"></span></p>
+    <p><strong>Status:</strong> <span id="dayStatusText">--</span></p>
+    <p><strong>Punch In:</strong> <span id="punchInTime">--</span></p>
+    <p><strong>Punch Out:</strong> <span id="punchOutTime">--</span></p>
+    <p><strong>Total Duration:</strong> <span id="duration">--</span></p>
+    <p class="status" id="status">--</p>
+  </div>
+
+  <!-- Report -->
+  <div class="card" id="report">
+    <h3>Report</h3>
+    <div id="reportTable"></div>
+  </div>
+</div>
+
+<script>
+  const todayKey = new Date().toISOString().split('T')[0];
+  document.getElementById("date").innerText = todayKey;
+
+  const parseTime = (hhmm) => {
+    if (!hhmm) return null;
+    const [hh, mm] = hhmm.split(':').map(Number);
+    return new Date(0, 0, 0, hh, mm);
+  };
+
+  const formatTime = (date) => {
+    if (!date) return '--';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  function loadTodayData() {
+    const data = JSON.parse(localStorage.getItem(todayKey)) || {};
+    if (data.status) {
+      document.getElementById("dayStatusText").innerText = data.status;
+    }
+    if (data.punchIn) document.getElementById("punchInTime").innerText = data.punchIn;
+    if (data.punchOut) {
+      document.getElementById("punchOutTime").innerText = data.punchOut;
+      calculateDuration(data.punchIn, data.punchOut);
+    }
+    if (data.status === "Leave" || data.status === "Holiday") {
+      document.getElementById("status").innerText = `Marked as ${data.status}`;
+      document.getElementById("status").style.color = "blue";
+    }
+  }
+
+  loadTodayData();
+
+  function punchIn() {
+    const now = new Date().toLocaleTimeString();
+    const log = JSON.parse(localStorage.getItem(todayKey)) || {};
+    if (log.status === "Leave" || log.status === "Holiday") return alert("Day marked as Leave/Holiday");
+    log.punchIn = now;
+    localStorage.setItem(todayKey, JSON.stringify(log));
+    document.getElementById("punchInTime").innerText = now;
+  }
+
+  function punchOut() {
+    const now = new Date().toLocaleTimeString();
+    const log = JSON.parse(localStorage.getItem(todayKey)) || {};
+    if (log.status === "Leave" || log.status === "Holiday") return alert("Day marked as Leave/Holiday");
+    log.punchOut = now;
+    localStorage.setItem(todayKey, JSON.stringify(log));
+    document.getElementById("punchOutTime").innerText = now;
+    calculateDuration(log.punchIn, log.punchOut);
+  }
+
+  function manualEntry() {
+    const inTime = document.getElementById("manualIn").value;
+    const outTime = document.getElementById("manualOut").value;
+    if (!inTime || !outTime) return alert("Enter both times");
+
+    const inFormatted = formatTime(parseTime(inTime));
+    const outFormatted = formatTime(parseTime(outTime));
+
+    const log = JSON.parse(localStorage.getItem(todayKey)) || {};
+    if (log.status === "Leave" || log.status === "Holiday") return alert("Day marked as Leave/Holiday");
+
+    log.punchIn = inFormatted;
+    log.punchOut = outFormatted;
+    localStorage.setItem(todayKey, JSON.stringify(log));
+    document.getElementById("punchInTime").innerText = inFormatted;
+    document.getElementById("punchOutTime").innerText = outFormatted;
+    calculateDuration(inFormatted, outFormatted);
+  }
+
+  function calculateDuration(inTimeStr, outTimeStr) {
+    const inDate = parseTime(to24HourFormat(inTimeStr));
+    const outDate = parseTime(to24HourFormat(outTimeStr));
+    if (!inDate || !outDate || outDate < inDate) return;
+    const diff = outDate - inDate;
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    document.getElementById("duration").innerText = `${h}h ${m}m`;
+
+    const status = document.getElementById("status");
+    if (h >= 9) {
+      status.innerText = "✅ 9 hours completed";
+      status.style.color = "green";
+    } else {
+      status.innerText = "❌ Less than 9 hours";
+      status.style.color = "red";
+    }
+  }
+
+  function to24HourFormat(timeStr) {
+    if (!timeStr || timeStr === '--') return null;
+    const d = new Date("01/01/2000 " + timeStr);
+    return d.getHours().toString().padStart(2, '0') + ":" + d.getMinutes().toString().padStart(2, '0');
+  }
+
+  function setDayStatus() {
+    const value = document.getElementById("dayStatus").value;
+    const log = JSON.parse(localStorage.getItem(todayKey)) || {};
+    if (value === "None") {
+      delete log.status;
+      document.getElementById("dayStatusText").innerText = "--";
+    } else {
+      log.status = value;
+      document.getElementById("dayStatusText").innerText = value;
+    }
+    localStorage.setItem(todayKey, JSON.stringify(log));
+    loadTodayData();
+  }
+
+  function showWeeklyReport() {
+    const today = new Date();
+    const report = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      const log = JSON.parse(localStorage.getItem(key));
+      if (log) {
+        report.push([
+          key,
+          log.status || '',
+          log.punchIn || '--',
+          log.punchOut || '--',
+          getDurationString(log.punchIn, log.punchOut, log.status)
+        ]);
+      }
+    }
+    renderReportTable(report.reverse());
+  }
+
+  function showMonthlyReport() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const report = [];
+    for (let i = 1; i <= 31; i++) {
+      const d = new Date(year, month, i);
+      if (d.getMonth() !== month) break;
+      const key = d.toISOString().split('T')[0];
+      const log = JSON.parse(localStorage.getItem(key));
+      if (log) {
+        report.push([
+          key,
+          log.status || '',
+          log.punchIn || '--',
+          log.punchOut || '--',
+          getDurationString(log.punchIn, log.punchOut, log.status)
+        ]);
+      }
+    }
+    renderReportTable(report);
+  }
+
+  function getDurationString(pIn, pOut, status) {
+    if (status === "Leave" || status === "Holiday") return status;
+    const inDate = parseTime(to24HourFormat(pIn));
+    const outDate = parseTime(to24HourFormat(pOut));
+    if (!inDate || !outDate || outDate < inDate) return '--';
+    const diff = outDate - inDate;
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return `${h}h ${m}m`;
+  }
+
+  function renderReportTable(data) {
+    let html = `<table><tr><th>Date</th><th>Status</th><th>Punch In</th><th>Punch Out</th><th>Duration</th></tr>`;
+    data.forEach(row => {
+      html += `<tr><td>${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td><td>${row[3]}</td><td>${row[4]}</td></tr>`;
+    });
+    html += `</table>`;
+    document.getElementById("reportTable").innerHTML = html;
+  }
+
+  function exportToExcel() {
+    const allData = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
+      const record = JSON.parse(localStorage.getItem(key));
+      allData.push({
+        Date: key,
+        Status: record.status || '',
+        PunchIn: record.punchIn || '--',
+        PunchOut: record.punchOut || '--',
+        Duration: getDurationString(record.punchIn, record.punchOut, record.status)
+      });
+    }
+    const ws = XLSX.utils.json_to_sheet(allData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "PunchLogs");
+    XLSX.writeFile(wb, "PunchLogs.xlsx");
+  }
+</script>
+
+</body>
+</html>
